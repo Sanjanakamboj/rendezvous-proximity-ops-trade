@@ -1,10 +1,11 @@
 # DESIGN.md — Rendezvous & Proximity Operations Trade
 
-Status: **Milestone 2 complete — CW state-transition matrix and two-impulse solver
-implemented and verified.** Milestone 1 content (scenario, equations, hand
-calculations, verification plan) is unchanged below except where the M2 section (12)
-adds the implemented/verified results. The Δv-vs-transfer-time trade (Milestone 3) is
-**not yet implemented**.
+Status: **Milestone 3 complete — Δv-vs-transfer-time trade study performed and
+verified.** Milestones 1–2 content (scenario, equations, hand calculations, STM/solver
+implementation) is unchanged below; M3 (section 13) adds the trade sweep, decision
+table, refined minimum-Δv search, and three trade-study figures, all built on the
+unmodified M2 solver. Keep-out zones, approach corridors, line-of-sight constraints,
+and nonlinear two-body validation remain **not implemented** (Milestone 4+).
 
 ---
 
@@ -659,3 +660,206 @@ approach-trajectory plot, and no Δv-vs-transfer-time trade figure is produced i
 ### 12.8 Limitations
 
 Unchanged from M1 §10 — restated in full there; still binding.
+
+---
+
+## 13. Milestone 3 — Δv-vs-transfer-time trade study
+
+M3 uses **only** the verified M2 solver (`rendezvous.solve_two_impulse`) and M2
+conditioning policy (`conditioning.py`) — no CW/rendezvous equations were changed or
+duplicated. The fixed M1 scenario (`r0, v0_minus, rf, vf_plus`, 400 km circular chief)
+is unchanged. New code: `src/rendezvous_cw/trade.py` (a thin, reusable wrapper around
+the M2 solver — `evaluate_transfer_time`, `sweep_transfer_times`,
+`find_best_safe_transfer`), `scripts/m3_trade_sweep.py` (generates all M3 artifacts),
+`results/m3_transfer_trade.csv` (curated decision table), `results/m3_full_sweep.csv`
+(full sweep, for reproducibility), and three figures (§13.7).
+
+### 13.1 Sweep interval and resolution
+
+- **Domain:** `T ∈ [300, 5100] s`, deliberately spanning the interior half-period
+  singularity at `T = P/2 ≈ 2776.812 s` (M1 §6.1 / M2 §12.3).
+- **Base resolution:** uniform 5 s spacing across the full domain (used for the
+  headline Δv curve, Figure 1, and the approach-trajectory comparison, Figure 2).
+- **Singularity probe:** a separate, dense 0.5 ms-resolution probe spanning
+  `P/2 ± 0.05 s`, used only to characterize the singularity itself (Figure 3) and to
+  produce real, solver-derived unsafe records — **not** merged into the headline Δv
+  curve's line density, and not used to search for a minimum. This matches the M3
+  instruction not to sample arbitrarily close to the singularity "just to create huge
+  values": the probe exists to *measure* the excluded region precisely, not to inflate
+  Δv anywhere it is reported as a trade result.
+
+### 13.2 Unsafe-conditioning policy (inherited unchanged from M2)
+
+`cond(Φrv) > 1×10⁶` ⇒ unsafe/excluded (`conditioning.COND_THRESHOLD`, M2 §12.3). No
+new threshold or policy was introduced in M3; `trade.evaluate_transfer_time` calls the
+same `conditioning.phi_rv_conditioning` used by the M2 solver and returns an explicit
+`safe=False` record (with real `cond`/`det` values, `dv_total = NaN`) instead of
+raising, so a sweep can carry unsafe points through as explicit excluded/NaN entries.
+
+### 13.3 How the singularity splits the feasible domain
+
+The 0.5 ms probe locates the excluded interval precisely by direct evaluation:
+
+```
+Excluded interval: [2776.802636, 2776.821636] s  (width = 0.019000 s ≈ 19 ms)
+centered at P/2 = 2776.812136 s
+```
+
+This is **far narrower** than the 5 s base sweep resolution — no point in the base
+sweep grid falls inside it, which is why the headline Δv curve (Figure 1) never
+contains a sample point flagged unsafe: the singularity is real and precisely
+characterized (Figure 3), but it is simply too narrow to be visible or to interrupt a
+minutes-scale plot without either artificially oversampling near it (which M3
+instructions rule out) or exaggerating the shaded region's width (which would
+misrepresent the physics). Figure 1 therefore marks `P/2` with a vertical line and an
+explicit annotation stating the true ~19 ms width, and Figure 3 shows the actual
+excluded band at millisecond resolution.
+
+The singularity splits `[300, 5100] s` into two **disjoint feasible branches**, each
+searched and minimized independently (never treating the domain as one smooth curve
+through the singularity, per M3 instructions):
+
+- **Branch 1** (`T < P/2`, short transfers): `T ∈ [300, 2776.80) s`
+- **Branch 2** (`T > P/2`, long transfers): `T ∈ (2776.82, 5100] s`
+
+### 13.4 Representative trade table
+
+Full table: [`results/m3_transfer_trade.csv`](results/m3_transfer_trade.csv). Summary
+(Δv columns in mm/s; all points safe unless noted):
+
+| T | T/P | cond(Φrv) | \|Δv1\| | \|Δv2\| | Δv_total | closure [m] |
+|---:|---:|---:|---:|---:|---:|---:|
+| 300 s | 0.054 | 1.06 | 3223.72 | 3223.90 | 6447.62 | 3.6×10⁻¹⁵ |
+| 600 s | 0.108 | 1.25 | 1670.01 | 1670.35 | 3340.36 | 0 |
+| 900 s | 0.162 | 1.62 | 1141.94 | 1142.45 | 2284.39 | 1.1×10⁻¹³ |
+| 1200 s | 0.216 | 2.25 | 856.97 | 857.64 | 1714.61 | 1.1×10⁻¹³ |
+| 1800 s (M2 ref.) | 0.324 | 5.29 | 531.72 | 532.80 | 1064.52 | 1.6×10⁻¹³ |
+| 2400 s | 0.432 | 20.16 | 354.64 | 356.26 | 710.89 | 1.1×10⁻¹³ |
+| P/2 − 0.02 s (just before excl. zone) | 0.500 | 4.81×10⁵ | 1500.00 | 1500.00 | 3000.00 | 3.6×10⁻¹⁵ |
+| P/2 + 0.02 s (just after excl. zone) | 0.500 | 4.81×10⁵ | 1500.00 | 1500.00 | 3000.00 | 0 |
+| 3600 s | 0.648 | 19.98 | 158.77 | 162.35 | 321.12 | 1.4×10⁻¹⁴ |
+| 4200 s | 0.756 | 18.46 | 106.15 | 111.44 | 217.59 | 1.4×10⁻¹⁴ |
+| 4800 s | 0.864 | 25.67 | 78.68 | 85.69 | 164.36 | 2.3×10⁻¹³ |
+| 5100 s | 0.918 | 39.26 | 86.82 | 93.22 | 180.04 | 0 |
+| **4868.130 s (refined min., branch 2)** | 0.877 | 27.62 | 78.20 | 85.25 | **163.457** | 3.6×10⁻¹⁵ |
+
+Note the "just before/after excluded zone" rows: at only 20 ms from `P/2` (safe by the
+`cond(Φrv) > 1e6` test but barely so, `cond ≈ 4.8×10⁵`), Δv is already ~3 m/s — an
+order of magnitude worse than the 1800 s reference — a direct, solver-derived
+illustration of why the conditioning policy exists: technically "safe" transfers
+immediately adjacent to the singularity are numerically valid but operationally
+useless.
+
+### 13.5 Refined minimum-Δv result
+
+Two disjoint local minima were found, one per branch (never compared as if on one
+smooth curve — see §13.3):
+
+- **Branch 1 minimum:** `T ≈ 2539.593 s` (`T/P ≈ 0.4573`), `Δv_total ≈ 678.609 mm/s`
+  — a genuine interior local minimum (verified: Δv decreases monotonically from 300 s
+  to ~2540 s, then rises sharply approaching the singularity — not a boundary artifact
+  of the search domain).
+- **Branch 2 minimum ("the" refined minimum, lower of the two):**
+  `T = 4868.130 s` (`T/P = 0.8766`)
+  `Δv1 = (-0.04437, -0.05431, 0.03462) m/s`, `|Δv1| = 78.205 mm/s`
+  `Δv2 = (-0.04437, 0.05431, -0.04848) m/s`, `|Δv2| = 85.253 mm/s`
+  `Δv_total = 163.457 mm/s`
+  `cond(Φrv) = 27.62` (very well-conditioned), terminal closure residual `3.6×10⁻¹⁵ m`.
+
+**Δv_total relative to the M2 T=1800 s reference (1064.520 mm/s): −84.64%** — i.e. a
+transfer time roughly 2.7× longer than the M2 reference reduces total Δv by roughly
+6.5×, within the searched domain and this fixed boundary-value problem.
+
+**Scope of the word "minimum" (stated explicitly, per M3 instructions):** this is the
+minimum-Δv transfer time found by (1) evaluating the CW two-impulse solver on a finite
+grid over the explicitly searched interval `[300, 5100] s`, excluding the
+`cond(Φrv) > 1e6` unsafe region, then (2) locally refining with a bounded scalar
+minimizer restricted to the immediate safe neighbors of the coarse grid minimum (never
+crossing into an unsafe sub-interval or outside the swept domain). It is:
+- **not** a global optimum over all possible transfer times (the search stops at
+  5100 s; Δv could behave differently beyond one orbital period, unexplored here),
+- **not** an optimum with respect to any variable other than transfer time (r0, rf,
+  vf_plus, and the chief orbit are all fixed),
+- **not** fuel-optimal, collision-safe, or operationally feasible for a real
+  spacecraft — it is a Δv-minimizing point of the linearized CW two-impulse
+  boundary-value problem only, under the M1 scenario's fixed endpoints,
+- **not** validated outside CW linear dynamics (no nonlinear two-body check has been
+  performed on this or any other M3 result).
+
+### 13.6 Numerical verification / convergence
+
+- **Grid-resolution convergence** (branch 2 minimum, coarse grid before refinement):
+
+  | grid step | T (coarse) | Δv_total |
+  |---:|---:|---:|
+  | 20 s | 4860.00 s | 163.4713 mm/s |
+  | 10 s | 4870.00 s | 163.4581 mm/s |
+  | 5 s | 4870.00 s | 163.4581 mm/s |
+  | refined (bounded scalar minimize within the 5 s grid's safe neighbors) | 4868.130 s | 163.4574 mm/s |
+
+  The coarse minimum location and value stabilize between 10 s and 5 s resolution
+  (identical at both), and refinement improves the value by only ~0.0007 mm/s beyond
+  the 5 s grid — i.e. the answer has converged well before reaching the refinement
+  step; refinement mainly sharpens the exact `T` location, not the Δv value.
+- **Direct-solver-vs-trade-module residual:** `trade.evaluate_transfer_time` matches
+  `rendezvous.solve_two_impulse` called directly to `< 1e-12` relative error on
+  `|Δv1|`, `|Δv2|`, `Δv_total`, and closure residual, for 7 arbitrary safe transfer
+  times spanning the domain (`tests/test_trade.py`, check B) — confirming the trade
+  module introduces no numerical drift.
+- **Worst terminal-position closure residual over all safe sweep points (1123
+  points, base 5 s grid + singularity probe):** `3.595×10⁻¹³ m`.
+- **Maximum condition number actually admitted as "safe" by the policy** across the
+  same sweep: `9.629×10⁵` (just under the `1e6` threshold, at the closest safe probe
+  point to `P/2`).
+- **STM-vs-independent-`solve_ivp` closure at the refined minimum transfer:** post-burn
+  state propagated by the closed-form STM matches an independent DOP853 integration
+  (rtol/atol `1e-12`) of the raw CW ODE to `< 1e-6` (position/velocity components);
+  the STM-propagated position matches `rf` to `< 1e-6 m` and STM-propagated pre-second-
+  burn velocity matches the solver's `vT_minus` to `< 1e-8 m/s`
+  (`tests/test_trade.py::test_refined_minimum_trajectory_closure`).
+- **Sweep-ordering independence:** ascending, descending, and shuffled evaluation
+  orders of the same time set produce bitwise-identical per-time results (no hidden
+  state/caching) — `tests/test_trade.py::test_sweep_independent_of_time_ordering`.
+- **Singularity-side behavior:** approaching `P/2` from both sides (offsets 10, 1,
+  0.1, 0.02 s), the condition number increases strictly monotonically on each side as
+  the offset shrinks (verified, not merely asserted); a dense 1 ms-resolution probe
+  spanning `P/2 ± 0.03 s` contains both unsafe points (inside the ~19 ms band) and safe
+  points immediately outside it on both sides, confirming the unsafe region genuinely
+  interrupts a fine-grained scan rather than being a modeling artifact.
+
+### 13.7 Figures
+
+1. **`figures/m3_dv_vs_transfer_time.png`** (headline) — total Δv (heavy red) plus
+   `|Δv1|`/`|Δv2|` (lighter supporting curves) vs. transfer time in minutes, over the
+   full safe domain in both branches, with the M2 1800 s reference (●) and the refined
+   branch-2 minimum (★) marked, a vertical line at `P/2`, and an explicit annotation
+   stating the true (~19 ms) width of the excluded region rather than a misleadingly
+   wide shaded band. Title states CW linearized dynamics, fixed M1 boundary
+   conditions, and that the unsafe region is excluded.
+2. **`figures/m3_approach_trajectory_comparison.png`** — LVLH x–y trajectories for four
+   safe transfers (600 s fast case, 1800 s M2 reference, 4868 s refined minimum, 5100 s
+   slow case), each labeled with its Δv, showing that the lowest-Δv transfer follows a
+   visibly different (deeper, closer-to-natural-drift) path than the fast case.
+3. **`figures/m3_conditioning_vs_transfer_time.png`** (verification/supporting) —
+   `cond(Φrv)` vs. time offset from `P/2` in milliseconds (log y-axis), the `1e6`
+   threshold line, and the actual excluded band shaded at true scale — this is the
+   figure that resolves what Figure 1 cannot show at its own scale.
+
+All three were visually inspected for clipping, overlapping annotations/legends, and
+correct unsafe-point handling (no line is drawn connecting across the excluded
+region in any figure) before being accepted.
+
+### 13.8 Explicitly not done in M3
+
+Everything listed as out-of-scope for M3 in the milestone instructions remains
+out of scope: keep-out zones, approach corridors, line-of-sight constraints,
+nonlinear two-body validation, J2/drag, finite burns, actuator/thruster models,
+generic black-box optimization, collision-risk probability. No claim of
+collision-safety, operational feasibility, fuel-optimality for a real spacecraft,
+global optimality, or validation outside CW linear dynamics is made anywhere in this
+section (see §13.5's explicit scope statement).
+
+### 13.9 Limitations
+
+Unchanged from M1 §10 (still binding) — see also M2 §12.7/12.8 and M3 §13.8 above for
+what remains unimplemented.
