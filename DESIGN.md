@@ -1,11 +1,16 @@
 # DESIGN.md — Rendezvous & Proximity Operations Trade
 
-Status: **Milestone 3 complete — Δv-vs-transfer-time trade study performed and
-verified.** Milestones 1–2 content (scenario, equations, hand calculations, STM/solver
-implementation) is unchanged below; M3 (section 13) adds the trade sweep, decision
-table, refined minimum-Δv search, and three trade-study figures, all built on the
-unmodified M2 solver. Keep-out zones, approach corridors, line-of-sight constraints,
-and nonlinear two-body validation remain **not implemented** (Milestone 4+).
+Status: **Milestone 4 complete — proximity-geometry-constrained trade performed and
+verified.** Milestones 1–3 content (scenario, equations, hand calculations, STM/solver
+implementation, unconstrained Δv/time trade) is unchanged below; M4 (section 14) adds
+geometric screening — a keep-out sphere, final V-bar approach corridor, and
+no-chief-crossing rule — layered on top of the unmodified M2/M3 solver and trade
+machinery. **Scope reminder:** M4 is linear-CW geometric screening only. A trajectory
+described as "geometrically feasible under this CW model" is **not** a claim of
+collision safety, flight safety, or operational safety. Nonlinear two-body validation,
+J2/drag, finite burns, actuator limits, sensor field-of-view, line-of-sight
+occultation, plume impingement, and collision-probability modeling remain **not
+implemented** (Milestone 5+).
 
 ---
 
@@ -863,3 +868,235 @@ section (see §13.5's explicit scope statement).
 
 Unchanged from M1 §10 (still binding) — see also M2 §12.7/12.8 and M3 §13.8 above for
 what remains unimplemented.
+
+---
+
+## 14. Milestone 4 — proximity-geometry-constrained trade
+
+**Scope statement (read first):** this section performs **geometric screening only**,
+inside the already-verified linearized CW model. A trajectory that passes these checks
+is described as **"geometrically feasible under this CW model"** — never as
+"collision-free", "flight safe", or "operationally safe". No sensor field of view,
+Earth occultation, plume impingement, docking dynamics, finite-burn execution, actuator
+limits, or collision probability is modeled. M4 uses **only** the verified M2 solver
+(`rendezvous.solve_two_impulse`), M2 closed-form STM (`cw.propagate_cw`), and M3 trade
+machinery — no dynamics were changed. New code: `src/rendezvous_cw/constraints.py`,
+`scripts/m4_constrained_trade.py`, `results/m4_constrained_trade.csv` (curated),
+`results/m4_full_constrained_sweep.csv` (full sweep), three figures (§14.9).
+
+### 14.1 Exact keep-out/corridor/no-crossing definitions
+
+- **A. Spherical keep-out zone (KOZ):** radius `r_KOZ = 100 m`, centered on the chief.
+  `‖r_rel(t)‖ ≥ r_KOZ` required for the whole coast, **except** while inside the
+  corridor (B).
+- **B. Final approach corridor:** `-100 m ≤ y ≤ -50 m`, `|x| ≤ 20 m`, `|z| ≤ 20 m`.
+  Only inside this box is `‖r‖ < r_KOZ` authorized. The M1 target
+  `r_f = (0, -50, 0) m` sits exactly at the corridor's inner (y = -50 m) end.
+- **C. No chief crossing:** `y(t) ≤ -50 m` for the entire transfer (endpoint tolerance
+  below).
+
+Within an unauthorized KOZ breach, two distinct reasons are reported separately rather
+than one collapsed flag (`src/rendezvous_cw/constraints.py` module docstring):
+`koz_violation` (breach while entirely outside the corridor's y-range — a generic
+keep-out breach) vs. `corridor_violation` (breach while within the corridor's y-range
+but outside its lateral x/z bounds — an attempted corridor approach from the wrong
+lateral position).
+
+### 14.2 Continuous-time checking method and tolerances
+
+1. Dense-sample `r(t)` at `sample_dt` spacing (production default 2 s for the sweep,
+   1 s or finer used in convergence checks and tests) using the verified closed-form
+   STM (`propagate_cw`) — no new dynamics.
+2. Classify every sample against all three constraints.
+3. Bracket the coarse-sample candidate minimum-distance time (and, separately, the
+   candidate minimum-clearance-outside-corridor time) with its immediate dense-sample
+   neighbors, then refine with `scipy.optimize.minimize_scalar` (`method="bounded"`)
+   on the continuous position function. Refinement can only find a smaller (worse)
+   minimum than the coarse grid saw — it strictly tightens, never loosens, the safety
+   check.
+4. **Floating-point boundary tolerance:** the M1 target sits exactly on the corridor's
+   `y = -50 m` boundary, and STM evaluation leaves ~10⁻¹³ m residuals there (verified
+   in M2/M3). Directly observed: for some transfer times, the closed-form STM evaluates
+   the exact target point as `y = -49.999999999999886` — numerically *above* -50 m by
+   ~1.1×10⁻¹³ m, which would misclassify the valid endpoint as a corridor/chief-crossing
+   violation without a tolerance. `CORRIDOR_BOUNDARY_TOL_M = CHIEF_CROSSING_TOL_M =
+   1×10⁻⁶ m` is applied to all three boundary checks — six orders of magnitude larger
+   than the observed residual, so it absorbs floating-point noise while remaining far
+   below any physically meaningful boundary distance (this exact bug was caught and
+   fixed during M4 development — see §14.10).
+
+### 14.3 Re-evaluating the M3 trade under constraints
+
+Domain and resolution: `T ∈ [300, 5100] s` (unchanged from M3), 10 s sweep step, 2 s
+constraint-sampling spacing. The M3 `cond(Φrv) > 1e6` exclusion policy is inherited
+unchanged (`conditioning.py`, untouched). Feasible set =
+`M3 numerically safe AND M4 geometrically safe`; M3-unsafe points are never
+reclassified by geometry (verified in tests, check F).
+
+**Result: only 9 of 481 M3-safe sweep points (1.87%) are M4-geometrically feasible —
+all of them fast transfers `T ≲ 387 s`.** No other feasible window exists anywhere in
+`[300, 5100] s` (confirmed by full-domain sweep at 10 s resolution — a single
+contiguous feasible band at the very start of the domain, nothing elsewhere).
+
+**Why:** for a two-impulse transfer between these fixed, widely-separated endpoints
+(`r0` 1000 m away, `rf` 50 m away, both with zero relative velocity), the natural CW
+coast path develops a large radial ("belly") excursion — tens to hundreds of meters —
+that only collapses toward zero in the final moments before reaching `rf`. For all but
+the fastest transfers, the trajectory's distance from the chief already drops below
+100 m *before* the lateral (x, z) offset has shrunk to within the corridor's 20 m
+bound — an unauthorized KOZ/corridor breach. Longer transfers (branch 2, `T ≳ 4200 s`,
+including the M3 unconstrained minimum) additionally **overshoot past the target
+along-track position** (`y > -50 m`, seen up to `y ≈ -39 m` for the M3 global minimum
+at `T = 4868.130 s`) before curving back to hit `rf` exactly at `t = T` — a genuine
+no-chief-crossing violation the pure-Δv M3 trade could not surface, since M3 only
+checked the two endpoints, not the continuous path.
+
+Rejection reason counts (of 472 M3-safe-but-M4-rejected points, 10 s sweep):
+`koz_violation`: 472, `corridor_violation`: 469, `chief_crossing_violation`: 232
+(points can carry more than one reason simultaneously).
+
+### 14.4 Do the M3 minima survive?
+
+**No — none of the three M3 key transfer times pass M4 geometry:**
+
+| Transfer | T (s) | M3 numerically safe? | M4 geometrically safe? | Reason |
+|---|---:|:---:|:---:|---|
+| M2 reference | 1800.000 | ✅ | ❌ | `corridor_violation, koz_violation` |
+| M3 short-branch minimum | 2539.593 | ✅ | ❌ | `corridor_violation, koz_violation` |
+| M3 long-branch/global minimum | 4868.130 | ✅ | ❌ | `corridor_violation, koz_violation, chief_crossing_violation` |
+
+The unconstrained M3 minimum-Δv transfer not only breaches the keep-out sphere well
+outside the authorized corridor, it also overshoots past the target along-track
+position — a materially worse geometric problem than the shorter transfers, despite
+its far lower Δv.
+
+### 14.5 Refined M4 minimum-Δv feasible transfer
+
+Bisection (50 iterations, 0.5 s constraint-sampling resolution) on the feasibility
+boundary between the largest feasible coarse-grid point (`T = 380 s`) and the next
+grid point (`T = 390 s`, infeasible) locates the boundary precisely:
+
+```
+T* = 386.563856 s   (T*/P = 0.069606, i.e. ~7.0% of one chief orbital period)
+Δv1 = (-1.0256, 2.3076, -0.0726) m/s   |Δv1| = 2526.251 mm/s
+Δv2 = (-1.0256, -2.3076, 0.0801) m/s   |Δv2| = 2526.479 mm/s
+Δv_total = 5052.7305 mm/s
+cond(Φrv) = 1.099 (very well-conditioned)
+terminal closure residual = 5.68×10⁻¹⁴ m
+minimum clearance outside corridor = +1.55×10⁻⁵ m  (i.e. essentially zero margin —
+    the constraint is ACTIVE at this optimum, as expected for a constrained minimum)
+minimum distance to chief = 50.000 m, occurring exactly at t = T (coincides with rf)
+corridor entry time = 366.087 s (≈20.5 s before arrival)
+```
+
+**Δv penalty:** +374.6% relative to the M2 T=1800 s reference (1064.520 mm/s), and
+**+2991% (≈30.9×)** relative to the unconstrained M3 global minimum (163.457 mm/s at
+T=4868.130 s). This is the central M4 engineering finding: a tight 20 m-wide,
+100 m-radius approach corridor is extremely costly for this scenario's boundary
+conditions — the cheapest geometrically feasible transfer costs roughly 5× the M2
+reference and roughly 31× the unconstrained optimum.
+
+**Practical note on margin:** the mathematically refined optimum sits with ~15 µm of
+clearance margin — an artifact of it being an active-constraint boundary point, not a
+robust engineering margin. A practical selection would back off to, e.g., `T = 380 s`
+(clearance ≈ 0.875 m, Δv_total ≈ 5136.0 mm/s) or `T = 375 s` (clearance ≈ 1.564 m,
+Δv_total ≈ 5201.5 mm/s) for a non-zero safety margin — both are in the curated CSV.
+
+### 14.6 Decision table
+
+Full table: [`results/m4_constrained_trade.csv`](results/m4_constrained_trade.csv).
+Summary:
+
+| Transfer | T (s) | M3 safe | M4 safe | Δv_total (mm/s) | min dist (m) | reason |
+|---|---:|:---:|:---:|---:|---:|---|
+| M2 reference | 1800.000 | ✅ | ❌ | 1064.52 | 50.00¹ | corridor+koz |
+| M3 short-branch min | 2539.593 | ✅ | ❌ | 678.61 | 50.00¹ | corridor+koz |
+| M3 long-branch/global min | 4868.130 | ✅ | ❌ | 163.46 | 44.06 | corridor+koz+crossing |
+| fast safe transfer | 300.000 | ✅ | ✅ | 6447.62 | 50.00 | none |
+| slow safe transfer | 5100.000 | ✅ | ❌ | 180.04 | 43.64 | corridor+koz+crossing |
+| just-safe boundary point | 385.000 | ✅ | ✅ | 5072.31 | 50.00 | none |
+| just-unsafe boundary point | 390.000 | ✅ | ❌ | 5010.26 | 50.00¹ | koz |
+| **refined M4 minimum** | **386.564** | ✅ | ✅ | **5052.73** | **50.00** | **none** |
+
+¹ `min_distance_m` is the raw global closest-approach distance regardless of corridor
+authorization — for these transfers it coincides with the terminal point (50 m) even
+though an *unauthorized* dip below 100 m occurs earlier in the coast; that is exactly
+what `min_clearance_outside_corridor_m` (§14.5, Figure 3) captures and `min_distance_m`
+does not — see `results/m4_full_constrained_sweep.csv` for both columns together.
+
+### 14.7 Verification / convergence evidence
+
+- **Grid-resolution convergence at the selected T=380 s transfer:** min-distance at
+  2 s sampling vs. 1 s sampling agree to `< 1 m` (both ≈50.0 m, since the closest
+  approach coincides with the fixed terminal point for these fast transfers); refined
+  (bounded-scalar-minimized) value is `≤` the 1 s-sampled value, never worse
+  (`tests/test_constraints.py::test_constraint_margin_convergence_at_selected_transfer`).
+- **STM-vs-independent-ODE geometric residual** along the selected T=380 s transfer:
+  max state-component discrepancy vs. an independent `scipy.integrate.solve_ivp`
+  (DOP853, rtol/atol 1e-12) integration of the raw CW ODE, sampled at 10 points across
+  the coast: **7.62×10⁻¹² m/(m/s)** — consistent with the M2/M3 residuals, confirming
+  the constraint classification is being applied to a dynamically correct trajectory.
+- **Worst terminal-position closure residual across the entire 481-point sweep:**
+  `3.595×10⁻¹³ m` — unchanged in magnitude from M3 (constraint evaluation does not
+  perturb the solver).
+- **M3 regression preserved exactly** through the M4 pipeline: T=1800/2539.593/4868.130 s
+  Δv values reproduce the M3-authoritative figures to `< 0.05` mm/s
+  (`tests/test_constraints.py::test_m3_dv_values_unchanged_through_m4_pipeline`).
+- **Sweep-order independence:** ascending/descending/shuffled evaluation of the same
+  time set produce identical per-time `(safe, min_distance, violation_reason)` tuples
+  (`tests/test_constraints.py::test_constraint_classification_independent_of_evaluation_order`).
+- **Continuous refinement demonstrably recovers a tighter minimum than coarse
+  sampling alone misses** (verified with a deliberately coarse 50 s sample against the
+  M3 long-branch-minimum trajectory,
+  `tests/test_constraints.py::test_refinement_recovers_true_minimum_missed_by_coarse_sampling`).
+- **M3-unsafe times are never rescued by geometry:** `solve_two_impulse` itself refuses
+  transfer times inside the `cond(Φrv) > 1e6` guard band, so there is no trajectory for
+  M4 to classify at those times at all — the distinction is structural, not just a
+  policy choice (`tests/test_constraints.py::test_m3_unsafe_times_never_rescued_by_geometry`).
+- **26 new constraint-primitive/endpoint-tolerance/corridor-entry tests** all pass —
+  see `tests/test_constraints.py` for the full check list (task items A–J).
+
+### 14.8 A genuine bug found and fixed during M4 development
+
+While building `constraints.py`, an internal-consistency bug was found: the
+continuous-refinement step could discover a keep-out violation (a refined clearance
+value that crosses zero) that no discrete dense sample had caught, correctly setting
+the aggregate `safe=False` flag — but the human-readable `violation_reason` string was
+still built only from the discrete per-sample classifications, so it could report
+`safe=False` alongside `violation_reason="none"`, an internal contradiction. This was
+caught by manual inspection of sweep output (a rejection-reason histogram showed
+472 rejected points but only 469+232 reason tags, i.e. some rejections had no
+attributed reason) before any test was written against the buggy behavior. Fixed by
+unifying both the discrete and refinement-promoted violations through one `_note()`
+helper that updates `reasons` and `first_violation_time_s` together, with an assertion
+(`safe == (violation_reason == "none")`) enforcing the invariant going forward. This is
+a constraints.py logic fix, not an M2/M3 dynamics change — no CW equation, STM entry,
+or solver formula was touched.
+
+### 14.9 Figures
+
+1. **`figures/m4_constrained_dv_vs_transfer_time.png`** (headline) — Δv_total (log
+   scale) vs. transfer time, M3-safe-but-M4-rejected points in red, M4-feasible points
+   in green, the M2 reference and unconstrained M3 minimum both marked as
+   geometry-rejected, and the refined M4 feasible minimum marked with a star. The
+   `P/2` conditioning-exclusion gap is retained as a vertical marker.
+2. **`figures/m4_approach_geometry.png`** (headline) — the selected feasible
+   trajectory (T=386.6 s) in LVLH x–y, overlaid with the 100 m keep-out circle and the
+   corridor box, showing visually that the path stays outside the circle except while
+   inside the box, with a cross-track-vs-time inset panel.
+3. **`figures/m4_constraint_margin_vs_transfer_time.png`** (verification/supporting) —
+   minimum clearance outside the corridor vs. transfer time (0 m requirement line),
+   with chief-crossing violations marked separately (▽) since that failure mode is not
+   captured by the clearance metric alone.
+
+All three were visually inspected for clipping, overlapping legends/annotations,
+correct safe/rejected visual distinction, and to confirm no line is drawn connecting
+across a discontinuity in a way that implies a rejected point is feasible.
+
+### 14.10 Limitations
+
+Unchanged from M1 §10 (still binding), plus the M4-specific scope statement at the top
+of this section (§14, restated): this is linear-CW **geometric screening only** — not
+collision probability, not a nonlinear-dynamics check, not a sensor/FOV/occultation/
+plume model, not a finite-burn or actuator-limited feasibility check. See also M2
+§12.7/12.8 and M3 §13.8 for what else remains unimplemented.

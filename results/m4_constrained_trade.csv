@@ -1,0 +1,9 @@
+label,T_s,T_min,T_over_P,m3_numerically_safe,m4_geometry_safe,cond_phi_rv,dv_total_m_s,min_distance_m,time_of_min_distance_s,min_y_m,max_y_m,koz_violation,corridor_violation,chief_crossing_violation,violation_reason,closure_error_m
+M2 reference (1800 s),1800.000000,30.000000,0.32411267,True,False,5.289677e+00,1.064520,50.000000,1800.000000,-1000.000000,-50.000000,True,True,False,"corridor_violation,koz_violation",1.608e-13
+M3 short-branch minimum,2539.592622,42.326544,0.45728564,True,False,3.496710e+01,0.678609,50.000000,2539.592622,-1000.000000,-50.000000,True,True,False,"corridor_violation,koz_violation",1.146e-13
+M3 long-branch/global minimum,4868.130154,81.135503,0.87656815,True,False,2.762393e+01,0.163457,44.064683,4669.207997,-1010.996242,-39.003758,True,True,True,"corridor_violation,koz_violation,chief_crossing_violation",3.553e-15
+fast safe transfer (300 s),300.000000,5.000000,0.05401878,True,True,1.058714e+00,6.447620,50.000000,300.000000,-1000.000000,-50.000000,False,False,False,none,3.553e-15
+slow safe transfer (5100 s),5100.000000,85.000000,0.91831924,True,False,3.926261e+01,0.180040,43.637770,4891.112737,-1014.156498,-35.843502,True,True,True,"corridor_violation,koz_violation,chief_crossing_violation",0.000e+00
+"near feasibility boundary (safe side, 385 s)",385.000000,6.416667,0.06932410,True,True,1.097902e+00,5.072315,50.000000,385.000000,-1000.000000,-50.000000,False,False,False,none,0.000e+00
+"near feasibility boundary (unsafe side, 390 s)",390.000000,6.500000,0.07022441,True,False,1.100544e+00,5.010256,50.000000,390.000000,-1000.000000,-50.000000,True,False,False,koz_violation,3.553e-15
+refined M4 minimum-feasible transfer,386.563856,6.442731,0.06960569,True,True,1.098724e+00,5.052731,50.000000,386.563856,-1000.000000,-50.000000,False,False,False,none,5.684e-14
