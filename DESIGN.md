@@ -1,16 +1,18 @@
 # DESIGN.md — Rendezvous & Proximity Operations Trade
 
-Status: **Milestone 4 complete — proximity-geometry-constrained trade performed and
-verified.** Milestones 1–3 content (scenario, equations, hand calculations, STM/solver
-implementation, unconstrained Δv/time trade) is unchanged below; M4 (section 14) adds
-geometric screening — a keep-out sphere, final V-bar approach corridor, and
-no-chief-crossing rule — layered on top of the unmodified M2/M3 solver and trade
-machinery. **Scope reminder:** M4 is linear-CW geometric screening only. A trajectory
-described as "geometrically feasible under this CW model" is **not** a claim of
-collision safety, flight safety, or operational safety. Nonlinear two-body validation,
-J2/drag, finite burns, actuator limits, sensor field-of-view, line-of-sight
-occultation, plume impingement, and collision-probability modeling remain **not
-implemented** (Milestone 5+).
+Status: **Milestone 5 complete — nonlinear two-body validation and robustness
+refinement performed.** Milestones 1–4 content (scenario, equations, hand
+calculations, STM/solver implementation, unconstrained Δv/time trade, geometric
+constraints) is unchanged below; M5 (section 15) validates the M4-selected trajectory
+against an independent nonlinear two-body model, finds the M4 CW-boundary optimum
+survives nonlinear validation but only with a razor-thin margin, and recommends a
+nearby, more robust transfer instead. **Scope reminder (both M4 and M5):** this
+project performs geometric screening inside a model — first CW-linear (M4), now also
+checked against nonlinear two-body dynamics (M5). Neither milestone's "passes" language
+is a claim of collision safety, flight safety, or operational safety. J2/drag, finite
+burns, actuator limits, sensor field-of-view, line-of-sight occultation, plume
+impingement, docking dynamics, and collision-probability modeling remain **not
+implemented** (Milestone 6+).
 
 ---
 
@@ -1100,3 +1102,249 @@ of this section (§14, restated): this is linear-CW **geometric screening only**
 collision probability, not a nonlinear-dynamics check, not a sensor/FOV/occultation/
 plume model, not a finite-burn or actuator-limited feasibility check. See also M2
 §12.7/12.8 and M3 §13.8 for what else remains unimplemented.
+
+---
+
+## 15. Milestone 5 — nonlinear two-body validation and robustness
+
+**Scope statement (read first):** this section checks the CW/M4 result against a
+higher-fidelity **nonlinear two-body** model — still no J2, drag, finite burns,
+actuator limits, sensor FOV, occultation, or collision probability. A trajectory
+described as passing here is **"geometrically feasible under this CW model, validated
+against nonlinear two-body dynamics"** — never "collision-free", "flight-qualified",
+or "operationally safe". M5 uses **only** the verified M2 solver
+(`rendezvous.solve_two_impulse`), M2 STM (`cw.propagate_cw`), and M4 constraint logic
+(`constraints.classify_point`, reused by the new nonlinear classifier) — no CW
+equation, STM entry, or M1–M4 solver formula was changed. New code:
+`src/rendezvous_cw/nonlinear.py`, `scripts/m5_nonlinear_validation.py`, three CSVs,
+three figures (§15.9).
+
+### 15.1 Nonlinear model
+
+Independent inertial (ECI-like) Cartesian two-body propagation for chief and deputy,
+integrated **separately** with `scipy.integrate.solve_ivp` (DOP853, `rtol=1e-12`,
+`atol=1e-9`):
+
+```
+rddot = -mu * r / ||r||^3
+```
+
+using the same `mu = MU_EARTH` as M1/M2 (`orbit.py`, unchanged). No CW equation
+appears anywhere in `nonlinear.py`; it is a from-scratch propagator used only to
+*check* the CW model. The chief starts on the analytic circular initial condition
+`r_c0=(a,0,0)`, `v_c0=(0,sqrt(mu/a),0)` and is then verified — not assumed — to stay
+circular under numerical propagation (§15.4, check A).
+
+### 15.2 LVLH ↔ inertial frame kinematics
+
+At any instant, given the chief's inertial state `(r_c, v_c)`:
+
+```
+x_hat = r_c / ||r_c||                     (radial, outward)
+h_c   = r_c x v_c                          (specific angular momentum)
+z_hat = h_c / ||h_c||                      (cross-track / orbit-normal)
+y_hat = z_hat x x_hat                      (along-track; right-handed)
+C     = [x_hat | y_hat | z_hat]            (LVLH-to-inertial rotation matrix)
+omega_inertial = h_c / ||r_c||^2           (LVLH frame's inertial angular velocity;
+                                             exact for any orbit, not only circular)
+```
+
+Deputy inertial state from an LVLH relative state `(r_rel, v_rel)`:
+
+```
+r_dep = r_c + C @ r_rel
+v_dep = v_c + C @ v_rel + omega_inertial x (C @ r_rel)
+```
+
+**The rotating-frame `omega x r` term is essential** — `v_dep` is *not* simply
+`v_c + C @ v_rel`; omitting the Coriolis-type term would silently misstate the
+deputy's inertial velocity by an amount comparable to `n * ||r_rel||` (≈ 1.1 m/s for
+the M1 1000 m separation — far larger than the mm/s-scale burns being analyzed, so
+this is not a subtle effect). The inverse transform (`inertial_to_lvlh`) solves the
+same equation for `v_rel` using `C^T = C^-1` (C is orthonormal by construction).
+
+### 15.3 Reproducing the CW trajectories nonlinearly
+
+For each representative transfer: (1) solve for the impulsive burn pair with the
+unmodified M2 solver, (2) convert `(r0, v0_plus)` to inertial via `lvlh_to_inertial`
+at `t=0`, (3) propagate chief and deputy independently with the nonlinear model,
+(4) reconstruct the LVLH relative state at each sample time via `inertial_to_lvlh`
+using each body's own *propagated* (osculating) state, (5) compare to the CW-STM
+prediction at the same times. No nonlinear correction burn is applied in this step
+(§15.8 adds one, separately, only for the final recommended transfer).
+
+### 15.4 Verification (checks A–G — summary; full detail in `tests/test_nonlinear.py`)
+
+- **A. Chief-orbit conservation** (one full period, 400 samples): radius constant to
+  `< 1.4×10⁻⁵ m` (6778 km orbit), specific energy conserved to `< 1×10⁻⁴` (relative to
+  a mean of `-2.94×10⁷`), angular momentum conserved to `< 0.09` (relative to
+  `~5.2×10¹⁰`), final position after one period returns to within `1.5×10⁻⁵ m` of the
+  start — all far tighter than any effect being measured.
+- **B. Frame round trips:** LVLH basis orthonormal and right-handed
+  (`x̂ × ŷ = ẑ`, `det(C) = 1`) to `< 1×10⁻¹²`; LVLH→ECI→LVLH round trip (position *and*
+  velocity, the latter exercising the `ω×r` term) exact to `< 1×10⁻⁹` for several
+  arbitrary `(r_rel, v_rel)`; zero relative state maps exactly to the chief state;
+  `+x`/`+y`/`+z` map exactly to radial/along-track/orbit-normal directions.
+- **C. CW small-time consistency:** a short (60 s), small-separation (50 m) transfer
+  shows `< 1 cm` maximum CW-vs-nonlinear position deviation, as expected.
+- **D. Separation-scaling trend:** a 250 m-separation case shows strictly smaller CW
+  error than a 1000 m case (same geometry, same T=1800 s) — see §15.7.
+- **E. Integrator-tolerance convergence:** CW-vs-nonlinear terminal error agrees to
+  `< 1%` between `(rtol,atol) = (1e-12,1e-9)` and `(1e-13,1e-10)` — the measured error
+  is real linearization error, not integrator noise.
+- **F. M4 regression preserved:** CW `Δv_total` at T=1800 s and at the M4-selected
+  T=386.564 s reproduce the M3/M4-authoritative values to `< 0.05` mm/s through the M5
+  pipeline; the M4-selected transfer's CW feasibility classification is unchanged.
+- **G. Final selected-case regression:** dedicated tests pin the M5-recommended
+  transfer's CW Δv, CW margin, nonlinear terminal position error, and nonlinear
+  constraint classification/margin.
+
+18 new tests, all passing (`tests/test_nonlinear.py`).
+
+### 15.5 Does the M4 optimum survive nonlinear validation?
+
+**Yes — but only just.** The CW closed-form model predicted the M4 boundary optimum
+(T=386.564 s) sits with `1.55×10⁻⁵ m` (15 µm) of active-constraint margin. Evaluating
+the *same* burn pair's trajectory nonlinearly and re-running the identical M4
+constraint classification (reusing `constraints.classify_point`, not a redefinition):
+
+```
+CW margin (T=386.564 s):          +0.0000155 m   (safe, by construction — the CW boundary)
+Nonlinear margin (same T):        +0.027548 m    (safe — PASSES)
+```
+
+The nonlinear margin is small but unambiguously positive, and — critically — this
+result is **robust to sampling resolution** (`0.027548`–`0.027564 m` across
+`sample_dt` from 2 s down to 0.1 s) **and to integrator tolerance**
+(`0.027535`–`0.027558 m` across three `(rtol, atol)` settings), confirming it reflects
+real dynamics, not numerical noise (§15.4, check E). The nonlinear model happens to be
+slightly *more* permissive than CW here — the true closest-approach clearance is
+marginally better than CW predicted — but 27.5 mm is still minuscule next to
+real-world navigation/actuation uncertainties, so per the M5 task's own framing this
+is treated as **operationally fragile even though it technically passes** (§15.6).
+
+### 15.6 Local robustness refinement (T = 365–390 s)
+
+A 26-point scan (1 s step) confirms:
+- CW and nonlinear margins track each other closely and both decrease monotonically
+  with `T` in this range (nonlinear margin consistently ~0.02–0.03 m *larger* than CW
+  here).
+- The nonlinear feasibility boundary sits between T=386 s (margin +0.101 m, safe) and
+  T=387 s (margin −0.029 m, unsafe) — one second later than the CW boundary.
+- Full scan: `results/m5_local_robustness_scan.csv`.
+
+**M5-recommended transfer: T = 380 s.** Chosen because it converts the CW boundary
+optimum's microscopic margin into a comfortable, easily-defensible one at a small,
+explicitly-quantified Δv cost:
+
+| | T=386.564 s (M4 CW boundary) | **T=380 s (M5 recommended)** | change |
+|---|---:|---:|---:|
+| CW Δv_total | 5052.7305 mm/s | 5136.0226 mm/s | **+1.65%** |
+| CW margin | +0.0000155 m | +0.875219 m | **56,466×** |
+| Nonlinear margin | +0.027548 m | +0.902241 m | **32.8×** |
+
+Spending **1.65% more Δv buys a ~33× larger real (nonlinear) safety margin** —
+converting a millimeter-scale, sampling-and-tolerance-sensitive-looking pass into a
+comfortably-positive, meter-scale one. This is the central M5 engineering conclusion.
+See §15.9 Figure 3.
+
+**Important labeling note (per M5 task instructions):** the M4 T=386.564 s result is
+correct as reported in M4 — it was, and remains, the CW-model constrained optimum. It
+is now superseded, for practical recommendation purposes, by this M5 robustness
+analysis: **"CW-only constrained optimum — superseded by M5 robustness validation."**
+The M4 engineering history above (§14) is left unmodified.
+
+### 15.7 CW linearization error: transfer-time and separation scaling
+
+**Representative cases** (`results/m5_representative_cases.csv`; terminal position
+error = max CW-vs-nonlinear deviation in every case tested — the two coincide because
+error accumulates monotonically along these particular coast arcs, verified not
+assumed):
+
+| Case | T (s) | terminal pos. error (m) | terminal vel. error (mm/s) |
+|---|---:|---:|---:|
+| M4 practical margin (T=380 s) | 380.000 | 0.0109 | 0.0421 |
+| M4 selected (CW boundary) | 386.564 | 0.0113 | 0.0430 |
+| M2 reference | 1800.000 | 0.3987 | 0.4838 |
+| M3 short-branch minimum | 2539.593 | 0.9646 | 0.7642 |
+| M3 long-branch/global minimum | 4868.130 | 2.6734 | 0.2270 |
+
+Error grows with transfer time (more time for second-order/nonlinear effects to
+accumulate over the ~1 km-scale coast), consistent with CW being a first-order
+(linear) approximation of the true nonlinear relative dynamics.
+
+**Separation sensitivity** (fixed T=1800 s, direction of `r0` preserved, magnitude
+varied — `results/m5_separation_sensitivity.csv`):
+
+| \|r0\| (m) | \|\|r0\|\|/a | terminal error (m) | error ratio | separation ratio | (ratio)² |
+|---:|---:|---:|---:|---:|---:|
+| 250 | 3.69×10⁻⁵ | 0.02665 | — | — | — |
+| 500 | 7.38×10⁻⁵ | 0.10188 | 3.82 | 2.00 | 4.00 |
+| 1000 | 1.48×10⁻⁴ | 0.39831 | 3.91 | 2.00 | 4.00 |
+| 1500 | 2.21×10⁻⁴ | 0.88936 | 2.23 | 1.50 | 2.25 |
+
+Error scales approximately with the **square** of separation (a 2× separation
+increase gives a ~3.8–3.9× error increase against a 4.0× quadratic expectation; a
+1.5× increase gives a ~2.23× error increase against a 2.25× expectation) — exactly the
+expected behavior for a first-order linearization, whose leading-order error term is
+second-order in the small parameter `||r||/a`. This is a clean, textbook-consistent
+confirmation of the CW model's small-separation limitation (DESIGN.md §10/§1), not
+merely an assumption.
+
+### 15.8 Independent burn/terminal validation (T = 380 s, the recommended transfer)
+
+- CW-predicted `vT_minus`: magnitude 2568.1235 mm/s.
+- Nonlinear actual (numerically propagated) pre-second-burn velocity: magnitude
+  2568.1235 mm/s — **agrees with CW to `4×10⁻⁶` mm/s** (a vector difference of
+  `0.0421` mm/s, §15.7, but a near-identical scalar magnitude since the two vectors
+  are nearly parallel).
+- **Terminal position miss** (nonlinear actual position at `t=T` vs. `rf`):
+  **0.0109 m** — this is *not* zero, and a velocity-only second burn cannot correct
+  it.
+- Nonlinear-corrected second burn (nulls the *actual* nonlinear arrival velocity
+  instead of the CW-predicted one): magnitude 2568.1235 mm/s — indistinguishable from
+  the CW `Δv2` at this precision.
+- **Total Δv using the nonlinear-corrected second burn: 5136.0226 mm/s**, vs.
+  CW-only total 5136.0226 mm/s — a difference smaller than 0.001 mm/s.
+
+**Conclusion, stated per the task's explicit framing:** this is only
+*"CW first burn + nonlinear propagation + endpoint velocity correction,"* not a true
+nonlinear Lambert/rendezvous optimum. The velocity correction is negligible in this
+case (the CW and true arrival velocities already agree to µm/s-equivalent precision
+in magnitude), but it explicitly does **not** fix the ~1 cm terminal position miss —
+a velocity-only impulse cannot close a position gap at the instant it is applied. For
+the separations and transfer times in this project's scope, the ~1 cm position miss
+is itself far smaller than the M4 corridor's 20–50 m scale and is not operationally
+significant here, but the distinction (velocity correctable vs. position not) is
+stated explicitly because it would matter at larger separation or longer transfer
+time (§15.7).
+
+### 15.9 Figures
+
+1. **`figures/m5_cw_vs_nonlinear_trajectory.png`** (headline) — LVLH x–y trajectories
+   for the recommended T=380 s transfer: CW (solid) and nonlinear (dashed) are
+   visually indistinguishable at this scale (as expected, ~1 cm error against
+   50–1000 m geometry), with an inset panel showing the actual CW-vs-nonlinear
+   position-error magnitude growing over time. KOZ and corridor overlaid.
+2. **`figures/m5_cw_error_vs_transfer_time.png`** — log-log terminal position error
+   vs. transfer time for the five representative cases, showing the clear growth
+   trend from the M4 fast-transfer regime (~1 cm) to the M3 long-branch minimum
+   (~2.7 m).
+3. **`figures/m5_local_robustness_trade.png`** (headline) — two-panel: CW `Δv_total`
+   (top) and nonlinear geometry margin (bottom) vs. transfer time over T=365–390 s,
+   with the M4 CW-boundary optimum and the M5-recommended transfer both marked and a
+   0 m requirement line — this is the figure that communicates §15.6's central trade.
+
+All three visually inspected: no clipping, no legend overlap (a title-clipping issue
+in an early draft of Figure 2 was caught and fixed), KOZ/corridor clearly visible,
+CW-vs-nonlinear curves distinguishable where they differ meaningfully, inset scales
+explicitly labeled, no wording implying "collision-free" or "flight safe" anywhere.
+
+### 15.10 Limitations
+
+Unchanged from M1 §10 and M4 §14.10, plus: the nonlinear model here is still
+**unperturbed two-body** (no J2, no drag) — it validates CW's *linearization* error,
+not atmospheric or oblateness effects. No finite-burn execution, actuator limits,
+navigation/sensor error, or collision probability is modeled. The M5 "robustness"
+result is a deterministic sensitivity to model fidelity (CW vs. nonlinear two-body
+point dynamics), not a statistical/covariance-based robustness analysis.
