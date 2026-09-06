@@ -6,10 +6,12 @@ for a satellite-servicing rendezvous, culminating in:
 1. an approach-trajectory plot, and
 2. a Δv-vs-transfer-time trade table.
 
-**Status: Milestone 1 complete.** Scenario, governing equations, closed-form STM, the
-two-impulse method, hand-verified representative numbers, and the verification plan
-are documented in [`DESIGN.md`](DESIGN.md). **No solver code exists yet** — this
-milestone is documentation and scaffolding only.
+**Status: Milestone 2 complete.** The Clohessy–Wiltshire state-transition matrix,
+Φrv conditioning/singularity diagnostics, and the two-impulse boundary-value solver
+are implemented and verified (92 tests, `pytest -W error`) against the plan in
+[`DESIGN.md`](DESIGN.md) §9. The representative T = 1800 s transfer matches the M1
+hand-calculation target to 0.02 mm/s. **The full Δv-vs-transfer-time trade (Milestone
+3) is not implemented yet.**
 
 ## Model scope
 
@@ -30,15 +32,22 @@ scope statement and limitations.
 ## Repository layout
 
 ```
-├── DESIGN.md              Frame/sign conventions, CW equations, full STM, two-impulse
-│                           method, hand calculations, trade plan, verification plan,
-│                           limitations
-├── README.md               This file
-├── pyproject.toml          Packaging + pytest configuration
-├── src/rendezvous_cw/       Package (empty placeholder in M1 — CW solver is M2)
-├── tests/                   Test suite (placeholder in M1 — verification tests are M2)
-├── scripts/                 Analysis/plotting scripts (M2/M3)
-└── figures/                 Generated figures (M2/M3)
+├── DESIGN.md                    Frame/sign conventions, CW equations, full STM,
+│                                 two-impulse method, hand calculations, trade plan,
+│                                 verification plan, M2 implementation/verification
+│                                 results, limitations
+├── README.md                     This file
+├── pyproject.toml                Packaging + pytest configuration
+├── src/rendezvous_cw/
+│   ├── orbit.py                   Circular chief-orbit utilities (a, n, period)
+│   ├── cw.py                       Closed-form CW STM blocks + propagate_cw()
+│   ├── conditioning.py             Phi_rv determinant/condition-number diagnostics
+│   └── rendezvous.py                Two-impulse boundary-value solver
+├── tests/                        92 tests covering the M2 verification plan
+├── scripts/
+│   └── m2_plot_representative_transfer.py   Generates the M2 diagnostic figure
+└── figures/
+    └── m2_representative_transfer.png       M2 diagnostic figure (not portfolio-final)
 ```
 
 ## Development
@@ -51,8 +60,10 @@ pytest -W error
 
 ## Roadmap
 
-- **M1 (this milestone):** scenario definition, governing equations, closed-form STM,
-  two-impulse method, hand calculations, verification plan. No solver code.
-- **M2 (next, pending approval):** implement and unit-test the CW STM and two-impulse
-  solver against the verification plan in `DESIGN.md` §9.
-- **M3:** approach-trajectory plot and Δv-vs-transfer-time trade table/script.
+- **M1:** scenario definition, governing equations, closed-form STM, two-impulse
+  method, hand calculations, verification plan. No solver code.
+- **M2 (this milestone):** CW STM, Φrv conditioning policy, and two-impulse solver
+  implemented and verified (92 tests) against the M2 verification plan and the M1 hand
+  calculation. One diagnostic figure (`figures/m2_representative_transfer.png`).
+- **M3 (next, pending approval):** Δv-vs-transfer-time trade table/script and the
+  portfolio-final approach-trajectory plot.

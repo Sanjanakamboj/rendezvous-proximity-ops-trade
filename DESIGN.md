@@ -1,9 +1,10 @@
 # DESIGN.md — Rendezvous & Proximity Operations Trade
 
-Status: **Milestone 1 — scenario, equations, hand calculations, verification plan.**
-No CW solver code exists yet. Every number in this document is reproducible from the
-arithmetic shown inline (Python used only as a calculator; no project package code is
-invoked).
+Status: **Milestone 2 complete — CW state-transition matrix and two-impulse solver
+implemented and verified.** Milestone 1 content (scenario, equations, hand
+calculations, verification plan) is unchanged below except where the M2 section (12)
+adds the implemented/verified results. The Δv-vs-transfer-time trade (Milestone 3) is
+**not yet implemented**.
 
 ---
 
@@ -520,3 +521,141 @@ rendezvous-proximity-ops-trade/
 The CW STM implementation, the two-impulse solver, the approach-trajectory plot, and
 the Δv-vs-time trade table/script are all **Milestone 2/3 work** and are not present in
 this commit.
+
+---
+
+## 12. Milestone 2 — implementation and verification results
+
+M2 implements exactly the equations and method fixed in sections 3–7 above (no
+equations were changed) as a real, tested Python package, and verifies them against
+the 11-point plan in section 9. **The full Δv-vs-transfer-time trade (M3) is still not
+implemented** — M2 exercises only the single T = 1800 s representative transfer plus
+the standalone STM/conditioning verification suite.
+
+### 12.1 Package layout added in M2
+
+```
+src/rendezvous_cw/
+├── orbit.py          Circular chief-orbit utilities (a, n, period)
+├── cw.py              Closed-form CW STM blocks + propagate_cw()
+├── conditioning.py    Phi_rv determinant/condition-number diagnostics + policy
+└── rendezvous.py       Two-impulse boundary-value solver (solve_two_impulse)
+
+tests/
+├── conftest.py                 Shared fixtures + independent CW ODE reference
+├── test_orbit.py                n/period vs. this document
+├── test_cw.py                   STM identity, ODE residual, composition,
+│                                 planar invariance, cross-track oscillator,
+│                                 time-reversal (checks A,B,C,D,E,K)
+├── test_conditioning.py         Singularity detection (check I)
+├── test_ode_cross_check.py      Independent solve_ivp cross-check (check J)
+└── test_rendezvous.py           Terminal closure, burn reconstruction, trivial
+                                  case, M1 hand-calc regression (checks F,G,H)
+
+scripts/m2_plot_representative_transfer.py   Generates the M2 diagnostic figure
+figures/m2_representative_transfer.png       M2 diagnostic figure (not portfolio-final)
+```
+
+`propagate_cw()` is the sole production propagation path; it evaluates the closed-form
+STM directly (`state(t) = Phi(t, n) @ state0`). `scipy.integrate.solve_ivp` is used
+**only** inside `tests/test_ode_cross_check.py`, as an independent verification path —
+never in `src/`.
+
+### 12.2 Chief orbit (unchanged from M1)
+
+Reproduced by `orbit.chief_mean_motion_and_period()`:
+
+```
+n = 1.131366653611e-3 rad/s   (== M1 section 7.1 value, to 12 significant figures)
+P = 5553.624271252 s          (== M1 section 2.1 / 7.1 value)
+```
+
+### 12.3 Phi_rv conditioning policy (implemented per M1 §6.1's stated policy)
+
+`conditioning.phi_rv_conditioning(t, n)` returns `det(Φrv)`, `cond(Φrv)` (2-norm
+condition number, via `numpy.linalg.cond`), and an `unsafe` flag. **Policy:** a
+transfer time is unsafe if `cond(Φrv) > 1e6` (`COND_THRESHOLD`), *not* an absolute
+determinant cutoff — `Φrv`'s entries scale with `1/n`, so an absolute determinant
+threshold would need re-tuning per orbit regime, whereas the condition number directly
+measures error amplification in the linear solve regardless of scale. `cond = 1e6`
+means up to ~6 of double precision's ~16 digits can be lost — a conservative but not
+overly restrictive cutoff for this project's mm/s-level Δv targets. Full rationale is
+in the `conditioning.py` module docstring.
+
+Measured conditioning near the M1 half-period singularity (`T_period/2 ≈ 2776.812 s`,
+400 km chief):
+
+| Δt from singularity | cond(Φrv) | flagged unsafe? |
+|---:|---:|:---:|
+| 0 s (exact) | 8.90 × 10¹⁶ | yes |
+| 0.001 s | 9.63 × 10⁶ | yes |
+| 0.01 s | 9.63 × 10⁵ | no |
+| 0.1 s | 9.63 × 10⁴ | no |
+| 1 s | 9.62 × 10³ | no |
+| 10 s | 9.57 × 10² | no |
+
+Condition number strictly increases as `T` approaches the singularity (verified
+monotonically in `test_conditioning.py`); the `cond > 1e6` policy rejects a guard band
+of roughly ±(1–10) ms around each `nt = kπ` singular time for this scenario — tight,
+because conditioning degrades extremely sharply (not gradually) right at the
+singularity, so a tight guard band still catches every numerically dangerous point.
+`solve_two_impulse()` calls this check before ever calling `numpy.linalg.solve` on
+`Φrv`, and raises `SingularTransferError` (not a silently-huge Δv) when unsafe.
+
+### 12.4 Representative transfer (T = 1800 s) — authoritative M2 values
+
+Computed by `rendezvous.solve_two_impulse()` using the exact M1 scenario (§2) and
+compared against the M1 hand-calculation target (§7.3):
+
+| Quantity | M1 hand target (rounded) | M2 computed (double precision) | Discrepancy |
+|---|---:|---:|---:|
+| `\|Δv1\|` | 531.7 mm/s | 531.7191 mm/s | 0.019 mm/s |
+| `\|Δv2\|` | 532.8 mm/s | 532.8013 mm/s | 0.001 mm/s |
+| `Δv_total` | 1064.5 mm/s | 1064.5203 mm/s | 0.020 mm/s |
+
+All discrepancies are within M1's stated hand-calculation rounding (4 significant
+figures) — **no disagreement requiring investigation**. `v0_plus = (-0.507855,
+0.156582, 0.017056) m/s`; `vT_minus = (0.507855, 0.156582, -0.037986) m/s`;
+`Φrv(1800 s)` determinant `≈ 3.784 × 10⁹`, condition number `≈ 5.29` (very
+well-conditioned — this transfer time is far from any singularity).
+
+### 12.5 Numerical-quality residuals (not just "tests passed")
+
+Measured directly (see verification suite for the exact cases exercised):
+
+| Check | Metric | Max residual/error |
+|---|---|---:|
+| STM composition (`Φ(t1+t2)` vs. `Φ(t2)Φ(t1)`) | max abs. matrix entry residual, 5 (t1,t2) pairs | 1.46 × 10⁻¹¹ |
+| Time reversal (`Φ(-t)Φ(t)` vs. `I`) | max abs. matrix entry residual, 5 times | 4.77 × 10⁻¹² |
+| STM vs. independent `solve_ivp` (DOP853, rtol/atol 1e-12) | max abs. state-component error, 3 states × 5 times | 7.20 × 10⁻¹⁰ |
+| Terminal position closure (T = 1800 s transfer) | `‖r(T) − rf‖`, meters | 1.61 × 10⁻¹³ m |
+| M1 hand-target discrepancy | `Δv_total`, mm/s | 0.020 mm/s |
+| Condition number at exact half-period singularity | `cond(Φrv)` | 8.90 × 10¹⁶ (flagged unsafe) |
+
+All residuals are consistent with double-precision floating-point arithmetic on
+closed-form trigonometric expressions — i.e. the implementation matches the M1
+equations to numerical precision, not merely "close enough."
+
+### 12.6 Diagnostic figure
+
+`figures/m2_representative_transfer.png` (generated by
+`scripts/m2_plot_representative_transfer.py`): the T = 1800 s post-first-burn relative
+trajectory, LVLH x–y (radial vs. along-track) projection plus a cross-track (z) vs.
+time panel showing the 30 m out-of-plane offset being nulled smoothly by burn 1,
+reaching exactly `z = 0` at `t = T`. Labeled with transfer time and both burn
+magnitudes. This is a diagnostic figure only, not the M3 portfolio-final
+approach-trajectory plot, and no Δv-vs-transfer-time trade figure is produced in M2.
+
+### 12.7 Explicitly not done in M2
+
+- No Δv-vs-transfer-time trade sweep or table (M3).
+- No transfer-time optimization.
+- No keep-out zones, approach corridors, or line-of-sight constraints.
+- No nonlinear two-body validation (the `solve_ivp` cross-check in 12.5 validates the
+  *linear* CW ODE against the closed-form STM, not a nonlinear two-body propagator).
+- No J2, drag, finite burns, actuator models, or collision avoidance.
+- No portfolio-final figures.
+
+### 12.8 Limitations
+
+Unchanged from M1 §10 — restated in full there; still binding.
