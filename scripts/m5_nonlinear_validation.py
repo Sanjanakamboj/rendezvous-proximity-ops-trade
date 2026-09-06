@@ -292,16 +292,21 @@ def main() -> None:
     ax2.set_yscale("log")
     ax2.set_xlabel("transfer time T [s]  (log scale)")
     ax2.set_ylabel("position error [m]  (log scale)")
-    ax2.set_title(
-        "M5 — CW linearization error vs. transfer time\n"
-        "● terminal position error (△ max deviation coincides exactly with it in every\n"
-        "case here, so no separate triangle is visible) — M4 fast cases at left, M3 at right",
-        fontsize=9.5,
-    )
+    ax2.set_title("M5 — CW linearization error vs. transfer time", fontsize=11)
     ax2.legend(loc="upper left", fontsize=7.5, framealpha=0.92)
     ax2.grid(True, which="both", alpha=0.25)
+
+    fig2.tight_layout(rect=(0, 0.06, 1, 1))
+    fig2.text(
+        0.5, 0.015,
+        "● terminal position error   △ max CW-vs-nonlinear trajectory deviation "
+        "(coincides exactly with the terminal error in every case shown here, so no\n"
+        "separate triangle marker is visible) — M4 fast-transfer cases at left, "
+        "unconstrained M3 cases at right; supporting/diagnostic figure, not a final-decision plot",
+        ha="center", va="bottom", fontsize=7.5, color="0.35",
+    )
+
     fig2_path = FIGURES_DIR / "m5_cw_error_vs_transfer_time.png"
-    fig2.tight_layout()
     fig2.savefig(fig2_path, dpi=150)
     print(f"Wrote {fig2_path}")
 

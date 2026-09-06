@@ -44,6 +44,13 @@ corridor, *and* overshoots past the target along-track position before curving b
 a real safety problem the pure-Δv trade could not see, because it only ever checked
 the two trajectory endpoints, never the continuous path.
 
+The figure below makes this concrete: the M3 unconstrained minimum (✕ marker, far
+right) and the M2 reference (●) are both geometry-rejected (red), and essentially the
+entire unconstrained trade space is rejected — only a narrow band of fast transfers
+(green, left edge) remains geometrically feasible at all.
+
+![Geometric constraints reject the unconstrained M3 minimum and force a fast transfer](figures/m4_constrained_dv_vs_transfer_time.png)
+
 ## 4. Why the CW-only constrained optimum was superseded
 
 Once geometry constraints were applied (M4), the cheapest transfer that still passed
@@ -169,34 +176,45 @@ library versions (`DESIGN.md` §16.5).
 
 ### Figure hierarchy
 
-**Primary (final recommendation):**
-1. [`m5_local_robustness_trade.png`](figures/m5_local_robustness_trade.png) — the
-   headline Δv-vs-margin trade that selected T=380 s
-2. [`m5_cw_vs_nonlinear_trajectory.png`](figures/m5_cw_vs_nonlinear_trajectory.png) —
-   CW vs. nonlinear validation of the recommended transfer
+**Three principal portfolio figures — read together, they tell the whole story:**
 
-**Supporting (engineering history — superseded results, clearly labeled as such in
-`DESIGN.md`):**
+1. [`m3_dv_vs_transfer_time.png`](figures/m3_dv_vs_transfer_time.png) *(cited here
+   for the narrative; classified as supporting/history below — its own optimum is
+   superseded)* **finds the unconstrained low-Δv solution** (T≈4868 s, ≈163.5 mm/s).
+2. [`m4_constrained_dv_vs_transfer_time.png`](figures/m4_constrained_dv_vs_transfer_time.png)
+   **shows that geometric constraints invalidate that optimum** — the keep-out
+   sphere and approach corridor reject essentially the entire unconstrained trade
+   space and force a fast transfer (T≲387 s) instead.
+3. [`m5_cw_vs_nonlinear_trajectory.png`](figures/m5_cw_vs_nonlinear_trajectory.png) +
+   [`m5_local_robustness_trade.png`](figures/m5_local_robustness_trade.png)
+   **independently check the CW-constrained result against nonlinear two-body
+   propagation and select T=380 s for robustness**, rather than the M4 boundary
+   optimum (T≈386.6 s) that sits at essentially zero active-constraint margin.
 
-3. [`m4_constrained_dv_vs_transfer_time.png`](figures/m4_constrained_dv_vs_transfer_time.png) —
-   why only fast transfers are geometrically feasible at all
-4. [`m3_dv_vs_transfer_time.png`](figures/m3_dv_vs_transfer_time.png) — the
-   unconstrained trade that motivated the geometry constraints
-5. [`m5_cw_error_vs_transfer_time.png`](figures/m5_cw_error_vs_transfer_time.png) —
-   CW linearization error scaling
-6. [`m4_approach_geometry.png`](figures/m4_approach_geometry.png) — M4's own selected
-   trajectory vs. keep-out sphere/corridor
-7. [`m4_constraint_margin_vs_transfer_time.png`](figures/m4_constraint_margin_vs_transfer_time.png)
-8. [`m3_conditioning_vs_transfer_time.png`](figures/m3_conditioning_vs_transfer_time.png) —
-   Φrv singularity conditioning near P/2
+(All three are shown inline above, in §3 and §6, at the point in the narrative where
+each is most relevant — not repeated here to keep this reference list compact.)
 
-**Diagnostic / milestone history:**
+**Supporting / diagnostic / milestone history** (real engineering history, kept in
+the repository and fully documented in `DESIGN.md`, but **not** final-decision
+figures — each is superseded or subordinate to the three above):
 
-- [`m2_representative_transfer.png`](figures/m2_representative_transfer.png) — first
-  verified CW trajectory (T=1800 s reference, used throughout as a fixed comparison
-  point)
+- [`m3_dv_vs_transfer_time.png`](figures/m3_dv_vs_transfer_time.png) — the
+  unconstrained trade itself; its own T≈4868 s optimum is **superseded** once
+  geometry constraints are applied (§3 above)
 - [`m3_approach_trajectory_comparison.png`](figures/m3_approach_trajectory_comparison.png) —
   geometric path comparison across the unconstrained trade
+- [`m3_conditioning_vs_transfer_time.png`](figures/m3_conditioning_vs_transfer_time.png) —
+  Φrv singularity conditioning near P/2
+- [`m4_approach_geometry.png`](figures/m4_approach_geometry.png) — M4's own selected
+  trajectory (T≈386.6 s) vs. keep-out sphere/corridor; that transfer is itself
+  **superseded** by the M5 T=380 s recommendation (§4 above)
+- [`m4_constraint_margin_vs_transfer_time.png`](figures/m4_constraint_margin_vs_transfer_time.png) —
+  keep-out clearance margin vs. transfer time
+- [`m5_cw_error_vs_transfer_time.png`](figures/m5_cw_error_vs_transfer_time.png) —
+  CW linearization error scaling across all representative cases
+- [`m2_representative_transfer.png`](figures/m2_representative_transfer.png) — first
+  verified CW trajectory (T=1800 s reference, used throughout as a fixed comparison
+  point, never claimed optimal)
 
 ## 11. What this project demonstrates
 
