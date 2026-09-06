@@ -16,11 +16,6 @@ from scipy.integrate import solve_ivp
 
 from rendezvous_cw.conditioning import phi_rv_conditioning
 from rendezvous_cw.constraints import (
-    CHIEF_CROSSING_TOL_M,
-    CORRIDOR_X_BOUND,
-    CORRIDOR_Y_MAX,
-    CORRIDOR_Y_MIN,
-    CORRIDOR_Z_BOUND,
     R_KOZ,
     classify_point,
     classify_trajectory_constraints,

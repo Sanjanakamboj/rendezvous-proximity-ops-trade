@@ -1,18 +1,19 @@
 # DESIGN.md — Rendezvous & Proximity Operations Trade
 
-Status: **Milestone 5 complete — nonlinear two-body validation and robustness
-refinement performed.** Milestones 1–4 content (scenario, equations, hand
-calculations, STM/solver implementation, unconstrained Δv/time trade, geometric
-constraints) is unchanged below; M5 (section 15) validates the M4-selected trajectory
-against an independent nonlinear two-body model, finds the M4 CW-boundary optimum
-survives nonlinear validation but only with a razor-thin margin, and recommends a
-nearby, more robust transfer instead. **Scope reminder (both M4 and M5):** this
-project performs geometric screening inside a model — first CW-linear (M4), now also
-checked against nonlinear two-body dynamics (M5). Neither milestone's "passes" language
-is a claim of collision safety, flight safety, or operational safety. J2/drag, finite
-burns, actuator limits, sensor field-of-view, line-of-sight occultation, plume
-impingement, docking dynamics, and collision-probability modeling remain **not
-implemented** (Milestone 6+).
+Status: **Milestone 6 complete — project finalized for portfolio use.** Milestones
+1–5 content (scenario, equations, hand calculations, STM/solver implementation,
+unconstrained Δv/time trade, geometric constraints, nonlinear validation) is
+unchanged below except for hygiene fixes and "superseded" banners added in M6; see
+**§16 for the authoritative final result and the full superseded-result hierarchy**
+before reading any individual milestone section in isolation. **Final recommended
+transfer: T = 380 s, Δv_total ≈ 5.136 m/s, CW margin ≈ +0.875 m, nonlinear margin ≈
++0.902 m** (§16.1). **Scope reminder (applies throughout):** this project performs
+geometric screening inside a model — first CW-linear (M4), then cross-checked against
+nonlinear two-body dynamics (M5). No milestone's "passes" language is a claim of
+collision safety, flight safety, or operational safety. J2/drag, finite burns,
+actuator limits, sensor field-of-view, line-of-sight occultation, plume impingement,
+docking dynamics, and collision-probability modeling remain **not implemented** and
+are out of this project's scope.
 
 ---
 
@@ -672,6 +673,13 @@ Unchanged from M1 §10 — restated in full there; still binding.
 
 ## 13. Milestone 3 — Δv-vs-transfer-time trade study
 
+> **⚠ Superseded (see §16 for the authoritative final result).** This section's
+> `T ≈ 4868.130 s` **unconstrained** Δv minimum is a real, correctly-computed result of
+> the CW two-impulse trade — but it **fails** the M4 proximity-geometry constraints
+> (§14.4) and is retained here only as engineering history / the starting point that
+> motivated M4. It is **not** the project's recommendation. The final recommended
+> transfer is `T = 380 s` (§16.1 / §15.6).
+
 M3 uses **only** the verified M2 solver (`rendezvous.solve_two_impulse`) and M2
 conditioning policy (`conditioning.py`) — no CW/rendezvous equations were changed or
 duplicated. The fixed M1 scenario (`r0, v0_minus, rf, vf_plus`, 400 km circular chief)
@@ -874,6 +882,14 @@ what remains unimplemented.
 ---
 
 ## 14. Milestone 4 — proximity-geometry-constrained trade
+
+> **⚠ CW-only constrained optimum — superseded by M5 robustness validation (see §16).**
+> This section's `T ≈ 386.564 s` result is the correct minimum-Δv transfer *within the
+> CW model alone*, sitting at essentially zero (~15 µm) active-constraint margin by
+> construction. M5 (§15) found it survives nonlinear validation but only barely
+> (+27.5 mm real margin), and recommends `T = 380 s` instead for a robust, easily
+> defensible margin at a small Δv cost. This section's method, table, and figures
+> remain correct as originally computed and are retained for engineering history.
 
 **Scope statement (read first):** this section performs **geometric screening only**,
 inside the already-verified linearized CW model. A trajectory that passes these checks
@@ -1348,3 +1364,98 @@ not atmospheric or oblateness effects. No finite-burn execution, actuator limits
 navigation/sensor error, or collision probability is modeled. The M5 "robustness"
 result is a deterministic sensitivity to model fidelity (CW vs. nonlinear two-body
 point dynamics), not a statistical/covariance-based robustness analysis.
+
+---
+
+## 16. Milestone 6 — final technical audit, result hierarchy, and portfolio packaging
+
+M6 adds **no new rendezvous physics**. It performs a final repository-wide hygiene
+audit (dead code / unused imports found and fixed via `pyflakes` — see the M6 commit;
+no solver formula changed), establishes one authoritative result hierarchy across all
+five milestones' worth of engineering history, adds a `LICENSE`, a CI workflow
+(`.github/workflows/ci.yml`), and confirms fresh-environment reproducibility.
+
+### 16.1 Authoritative final result
+
+```
+Final recommended transfer:      T = 380 s   (T/P = 0.0684)
+Model used for design:            CW linearized relative-motion model (M2)
+Independent validation:           nonlinear two-body propagation (M5)
+Total Δv (CW):                    5.136023 m/s   (|Δv1| = 2.567899 m/s, |Δv2| = 2.568123 m/s)
+CW keep-out/corridor margin:      +0.875219 m
+Nonlinear keep-out/corridor margin: +0.902241 m
+Nonlinear terminal position miss: 0.0109 m  (not corrected by any burn in this analysis)
+Nonlinear validation:             PASSES modeled geometric constraints
+```
+
+### 16.2 Full engineering history (superseded results, retained and clearly labeled)
+
+| # | Result | T (s) | Status | Why superseded |
+|---|---|---:|---|---|
+| M2 | Representative transfer | 1800.000 | Diagnostic reference only | Never claimed optimal; used throughout as a fixed regression/comparison point |
+| M3 | Unconstrained global Δv minimum | 4868.130 | **Superseded — fails M4 geometry** | Breaches the keep-out sphere outside the corridor and overshoots past the target (chief-crossing) — see §14.4 |
+| M4 | CW-only constrained optimum | 386.564 | **Superseded — essentially zero CW margin, fragile** | Sits at ~15 µm active-constraint margin by construction; nonlinear validation shows only +27.5 mm real margin — technically passes but operationally fragile, see §15.5 |
+| **M5** | **Recommended robust transfer** | **380.000** | **Final recommendation** | +1.65% Δv over the M4 optimum buys a ~33× larger real (nonlinear) margin — see §15.6 |
+
+No result above is deleted or rewritten; each remains documented in its own
+milestone section (§13, §14, §15) exactly as originally computed. This table exists
+solely to prevent a reader from mistaking an earlier, superseded milestone result for
+the project's final recommendation.
+
+### 16.3 Terminology used consistently throughout this document (M6 audit)
+
+"CW linearized relative-motion model", "nonlinear two-body validation", "modeled
+geometric constraints", "keep-out zone (KOZ)", "V-bar approach corridor",
+"numerically unsafe / ill-conditioned transfer" (M2/M3 conditioning sense),
+"geometrically feasible under modeled constraints" (M4/M5 sense), "nonlinear
+validation pass/fail". Never: "collision-free", "flight-safe", "operationally safe",
+"flight-qualified", or an unscoped "globally optimal". Every use of "minimum" or
+"optimum" in this document is scoped to one of: *minimum within the searched
+transfer-time interval* (M3), *CW-only constrained optimum* (M4), or *M5 recommended
+robust transfer* (final).
+
+### 16.4 Repository hygiene fixed in M6
+
+- One genuinely dead local variable (`coarse_t_min_clearance`, assigned but never
+  read) removed from `constraints.py` — found by `pyflakes`, confirmed unused by
+  direct grep, no behavior change (verified: full test suite unchanged, 151→151
+  passing before and after).
+- Unused imports removed from `scripts/m3_trade_sweep.py`, `scripts/m4_constrained_trade.py`,
+  and `tests/test_constraints.py` (found by `pyflakes`).
+- One dead local variable (`state0`, computed then immediately shadowed/unused)
+  removed from `scripts/m3_trade_sweep.py`'s Figure 2 plotting loop.
+- No TODO/FIXME/placeholder comments, no debug `print()` calls in `src/`, no
+  hardcoded absolute local filesystem paths, and no secrets/credentials were found
+  anywhere in the tracked repository (checked by direct grep across `.py`/`.md`/
+  `.toml` files).
+- No broken relative links in `README.md` or `DESIGN.md` (every non-URL markdown
+  link target verified to exist on disk).
+- No duplicate/colliding figure output paths across `scripts/m2..m5_*.py` — each
+  milestone's figures are uniquely named and no script silently overwrites another
+  milestone's output.
+- Largest tracked file is 128 KB (`figures/m3_dv_vs_transfer_time.png`); no
+  oversized accidental files.
+
+### 16.5 Reproducibility
+
+Verified in a genuinely fresh `python3 -m venv` (no cached wheels reused from the
+development environment): `pip install -e ".[dev]"` installed cleanly (resolving
+newer library versions than development was done with: `numpy 2.5.3`,
+`scipy 1.18.1`, `matplotlib 3.11.1`), `pytest -W error` passed all 151 tests
+(21.3 s), and regenerating the T=380 s result and the M5 figures/CSVs from the copied
+source reproduced `Δv_total = 5136.022643719935` mm/s, CW margin
+`0.8752190597669625` m, and nonlinear margin `0.9022414877394453` m — **bit-for-bit
+identical** to the values reported in §16.1 and §15.6, despite the newer dependency
+versions. This is expected and unsurprising: the CW solver is closed-form arithmetic
+and the nonlinear ODE integration is deterministic (no random seeding anywhere in
+this project), so no fuzz in these numbers is expected across environments; the check
+confirms that expectation holds in practice, not merely in principle.
+
+### 16.6 What remains explicitly out of scope
+
+Unchanged from all prior milestones' limitations sections (§1, §10, §12.7/12.8,
+§13.8, §14.10, §15.10): no J2, drag, finite burns, thrust saturation,
+covariance/collision-probability modeling, sensor field of view, plume impingement,
+docking dynamics, or any additional optimization dimension. This project is a
+CW-linearized (with nonlinear-two-body cross-check) rendezvous trade study and
+geometric-screening demonstration — not a flight-qualification analysis.

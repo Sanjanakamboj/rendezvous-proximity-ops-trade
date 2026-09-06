@@ -37,7 +37,6 @@ from rendezvous_cw.constraints import (
     CORRIDOR_X_BOUND,
     CORRIDOR_Y_MAX,
     CORRIDOR_Y_MIN,
-    CORRIDOR_Z_BOUND,
     R_KOZ,
     classify_trajectory_constraints,
 )

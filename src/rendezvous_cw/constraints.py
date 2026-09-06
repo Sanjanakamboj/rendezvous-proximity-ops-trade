@@ -248,10 +248,8 @@ def classify_trajectory_constraints(
         clearance_outside = distances[outside_corridor_mask] - R_KOZ
         i_outside = np.where(outside_corridor_mask)[0][np.argmin(clearance_outside)]
         coarse_min_clearance = float(distances[i_outside] - R_KOZ)
-        coarse_t_min_clearance = float(times[i_outside])
     else:
         coarse_min_clearance = float("nan")
-        coarse_t_min_clearance = float("nan")
 
     def state_at(tt: float) -> np.ndarray:
         state0 = np.concatenate([np.asarray(r0, dtype=float), np.asarray(v0_plus, dtype=float)])

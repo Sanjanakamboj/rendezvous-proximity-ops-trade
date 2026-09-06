@@ -26,7 +26,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from rendezvous_cw.conditioning import COND_THRESHOLD, phi_rv_conditioning
+from rendezvous_cw.conditioning import COND_THRESHOLD
 from rendezvous_cw.cw import propagate_cw
 from rendezvous_cw.orbit import chief_mean_motion_and_period
 from rendezvous_cw.trade import TradeRecord, evaluate_transfer_time, find_best_safe_transfer, sweep_transfer_times
@@ -299,10 +299,9 @@ def main() -> None:
     colors = ["tab:blue", "black", "tab:green", "tab:purple"]
     for (label, t), color in zip(comparison_times.items(), colors):
         rec = evaluate_transfer_time(R0, V0_MINUS, RF, VF_PLUS, t, n, period)
-        state0 = np.concatenate([R0, np.array([np.nan, np.nan, np.nan])])
-        # Recompute v0_plus via the solver result directly (already have rec, but
-        # need the vector, so call solve again through evaluate_transfer_time's
-        # underlying solver for the full result object).
+        # Recompute via the solver directly (evaluate_transfer_time only
+        # returns the summary TradeRecord; the full result object with
+        # v0_plus is needed here to propagate the trajectory for plotting).
         from rendezvous_cw.rendezvous import solve_two_impulse
 
         full_result = solve_two_impulse(R0, V0_MINUS, RF, VF_PLUS, t, n)
